@@ -3,7 +3,6 @@ conda/
 fast-ad/data/
 fast-ad/outputs/
 logs/
-plots/
 
 # Claude Code
 .claude/
