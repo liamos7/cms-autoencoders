@@ -3,7 +3,12 @@ conda/
 fast-ad/data/
 fast-ad/outputs/
 logs/
-plots/# Python
+plots/
+
+# Claude Code
+.claude/
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -11,6 +16,7 @@ __pycache__/
 
 # Archives
 *.tar.gz
+
 # Model checkpoints and data
 *.pkl
 *.h5
