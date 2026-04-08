@@ -1,0 +1,16 @@
+# Large generated files
+conda/
+fast-ad/data/
+fast-ad/outputs/
+logs/
+plots/# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Archives
+*.tar.gz
+# Model checkpoints and data
+*.pkl
+*.h5
