@@ -33,17 +33,17 @@ python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {
 cd /scratch/network/lo8603/thesis/fast-ad
 
 # Run training
-'''
-python train-teacher.py \
-    -ds "CICADA" \
-    --data-root-path "./data/h5_files/" \
-    --model "NAEWithEnergyTraining" \
-    --load-pretrained-path "./outputs/latent_dim_variation/ae_zb_dim20/model_best.pkl" \
-    -o "./outputs/nae_phase2_tuned_dim20" \
-    -ho 1,2,3,4,5,6,7,8,9,10 \
-    --epochs 100 \
-    -v
-'''
+
+#python train-teacher.py \
+    #-ds "CICADA" \
+   # --data-root-path "./data/h5_files/" \
+   # --model "NAEWithEnergyTraining" \
+   # --load-pretrained-path "./outputs/latent_dim_variation/ae_zb_dim20/model_best.pkl" \
+   # -o "./outputs/nae_phase2_tuned_dim20" \
+    #-ho 1,2,3,4,5,6,7,8,9,10 \
+    #--epochs 100 \
+   # -v
+
 
 python train-teacher.py \
   --dataset CICADA \
@@ -52,7 +52,7 @@ python train-teacher.py \
     --load-pretrained-path "./outputs/latent_dim_variation/ae_zb_dim20/model_best.pkl" \
   --use-mc-negatives \
   --epochs 50 \
-  -o output/nae_mc_upper_bound_dim20/
+  -o ./outputs/nae_mc_upper_bound_dim20/
 
 echo "=============================="
 echo "End time: $(date)"

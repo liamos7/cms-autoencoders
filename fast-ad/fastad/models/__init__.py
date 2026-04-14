@@ -177,9 +177,9 @@ def get_teacher_model(model_name: str, dataset_name: str, pretrained_path: str =
     else:
         raise ValueError(f"Dataset {dataset_name} not recognized (use MNIST, FMNIST, or CIFAR10)")
     
-    if pretrained_path:
-        model_dict = torch.load(pretrained_path)
-        model.load_state_dict(model_dict['model_state'], strict=False)
+    # NOTE: NAEWithEnergyTraining factory functions (get_*_nae_with_energy) already
+    # call load_pretrained_nae internally, which loads weights and resets the replay
+    # buffer. Do not load weights a second time here.
 
     return model
 

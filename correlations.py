@@ -16,6 +16,25 @@ CORR_DIR = "plots/correlations"
 os.makedirs(TSNE_DIR, exist_ok=True)
 os.makedirs(CORR_DIR, exist_ok=True)
 
+LABEL_MAP = {
+    "glugluhtogg":         r"$gg \to H \to \gamma\gamma$",
+    "glugluhtotautau":     r"$gg \to H \to \tau\tau$",
+    "hto2longlivedto4b":   r"$H \to 2LL \to 4b$",
+    "singleneutrino":      "Single Neutrino",
+    "suep":                "SUEP",
+    "tt":                  r"$t\bar{t}$",
+    "vbfhto2b":            r"VBF $H \to bb$",
+    "vbfhtotautau":        r"VBF $H \to \tau\tau$",
+    "zb":                  "Zero Bias",
+    "zprimetotautau":      r"$Z' \to \tau\tau$",
+    "zz":                  r"$ZZ$",
+}
+
+COLORS = [
+    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+    "#42d4f4", "#f032e6", "#bfef45", "#469990", "#dcbeff", "#800000",
+]
+
 SAMPLES = [
     "glugluhtotautau",
     "hto2longlivedto4b",
@@ -30,6 +49,7 @@ SAMPLES = [
 ]
 
 CORR_SAMPLES = ["glugluhtogg"] + SAMPLES
+ALL_SAMPLES  = ["glugluhtogg"] + SAMPLES
 
 
 def plot_latent_tsne_with_observables(name, nmax=5000):
@@ -122,8 +142,72 @@ def plot_latent_correlations(name, nmax=5000):
     print(f"  Saved {out}")
 
 
+def plot_combined_tsne(samples=ALL_SAMPLES, nmax=2000):
+    """Run t-SNE on teacher_latent pooled across all datasets, colour by type."""
+    all_latents = []
+    all_labels  = []
+
+    for name in samples:
+        path = f"{H5_DIR}/{name}.h5"
+        if not os.path.exists(path):
+            print(f"  Skipping {name}: file not found")
+            continue
+        with h5py.File(path, "r") as f:
+            latent = f["teacher_latent"][:nmax]
+        all_latents.append(latent)
+        all_labels.extend([name] * len(latent))
+        print(f"  Loaded {name}: {len(latent):,} events")
+
+    latents_arr = np.concatenate(all_latents, axis=0)
+    labels_arr  = np.array(all_labels)
+
+    print(f"  Running t-SNE on {len(latents_arr):,} events × {latents_arr.shape[1]} dims...")
+    tsne = TSNE(n_components=2, perplexity=40, learning_rate="auto",
+                init="pca", random_state=42, n_jobs=-1)
+    coords = tsne.fit_transform(latents_arr)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    unique_names = [s for s in samples if s in set(labels_arr)]
+    for i, name in enumerate(unique_names):
+        mask = labels_arr == name
+        ax.scatter(
+            coords[mask, 0], coords[mask, 1],
+            s=3, alpha=0.4,
+            color=COLORS[i % len(COLORS)],
+            label=LABEL_MAP.get(name, name),
+            rasterized=True,
+        )
+
+    ax.set_xlabel("t-SNE 1", fontsize=12)
+    ax.set_ylabel("t-SNE 2", fontsize=12)
+    ax.set_title("t-SNE of teacher latent space (all datasets)", fontsize=13)
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1),
+        borderaxespad=0,
+        markerscale=4,
+        framealpha=0.9,
+        edgecolor="0.7",
+        fontsize=10,
+    )
+    ax.tick_params(labelsize=10)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fig.tight_layout()
+    out = os.path.join(TSNE_DIR, "tsne_combined.pdf")
+    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out.replace(".pdf", ".png"), bbox_inches="tight", dpi=150)
+    plt.close(fig)
+    print(f"  Saved {out}")
+
+
 if __name__ == "__main__":
-    print("=== t-SNE plots ===")
+    print("=== Combined t-SNE ===")
+    plot_combined_tsne()
+
+    print("\n=== Per-sample t-SNE plots ===")
     for name in SAMPLES:
         print(f"Processing {name}...")
         plot_latent_tsne_with_observables(name)

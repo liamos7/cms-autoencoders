@@ -54,10 +54,13 @@ def get_zb_val_indices(data_dir, max_events=MAX_EVENTS):
         np.full(sizes[cls], i, dtype=np.int8) for i, cls in enumerate(class_files) if sizes[cls] > 0
     ])
 
-    # StratifiedShuffleSplit only needs y, never materialises a copy of X
-    from sklearn.model_selection import StratifiedShuffleSplit
-    sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
-    _, idx_val = next(sss.split(y_full, y_full))
+    # Use the same parameterisation as datasets.py: train_size=int(0.8*N).
+    # StratifiedShuffleSplit with test_size=0.2 uses floor(0.2*N) which can
+    # differ by 1 from int(0.8*N), producing a different random permutation.
+    from sklearn.model_selection import train_test_split as _tts
+    N = len(y_full)
+    idx_all = np.arange(N)
+    _, idx_val = _tts(idx_all, train_size=int(0.8 * N), stratify=y_full, random_state=42)
 
     zb_size     = sizes["zb"]
     zb_val_idx  = idx_val[idx_val < zb_size]
