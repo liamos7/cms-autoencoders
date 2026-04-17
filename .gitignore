@@ -20,3 +20,6 @@ __pycache__/
 # Model checkpoints and data
 *.pkl
 *.h5
+
+# random pdfs
+*.pdf
