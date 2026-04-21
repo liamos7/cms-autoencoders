@@ -2,9 +2,8 @@
 # R² = 1 - SS_res/SS_tot: coefficient of determination for predicting a target
 # (teacher_score / total_et / nPV) from the 80-dimensional latent space via OLS.
 # Baseline R²=0 corresponds to always predicting the sample mean (no model).
-
-import argparse
 import os
+import argparse
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -86,7 +85,7 @@ def fit_lasso_cv(Z, y, cv=5):
     Z_s = scaler_Z.transform(Z)
     y_s = scaler_y.transform(y.reshape(-1, 1)).ravel()
 
-    model = LassoCV(cv=cv, n_alphas=100, eps=1e-4, max_iter=10000)
+    model = LassoCV(cv=cv, n_alphas=100, eps=1e-4, max_iter=10000, n_jobs=1)
     model.fit(Z_s, y_s)
 
     active_mask = model.coef_ != 0
@@ -126,18 +125,14 @@ def single_dim_r2(Z, y):
     """
     For each latent dimension, compute R² of a univariate linear regression.
     Returns array of shape (latent_dim,).
+    Vectorized: computes all dims at once via closed-form Pearson r².
     """
-    scaler_y = StandardScaler().fit(y.reshape(-1, 1))
-    y_s = scaler_y.transform(y.reshape(-1, 1)).ravel()
-
-    r2s = np.zeros(Z.shape[1])
-    for d in range(Z.shape[1]):
-        z_d = Z[:, d].reshape(-1, 1)
-        scaler_d = StandardScaler().fit(z_d)
-        z_d_s = scaler_d.transform(z_d)
-        reg = LinearRegression().fit(z_d_s, y_s)
-        r2s[d] = reg.score(z_d_s, y_s)
-    return r2s
+    # Standardize once across all dims
+    Z_s = (Z - Z.mean(axis=0)) / (Z.std(axis=0) + 1e-12)
+    y_s = (y - y.mean()) / (y.std() + 1e-12)
+    # r² for univariate OLS = Pearson r² = (Z_sᵀ y_s / n)²
+    r = (Z_s * y_s[:, None]).mean(axis=0)
+    return r ** 2
 
 
 def get_coef_magnitude_order(cv_result):
@@ -152,23 +147,39 @@ def cumulative_r2(Z, y, dim_order, do_cv=True):
     Compute R² using OLS with the first k dimensions (in the given order),
     for k = 1, 2, ..., len(dim_order).
     Optionally computes 5-fold CV R² at selected checkpoints.
+
+    Train R² is computed via QR decomposition: reuse the previous QR factorization
+    by appending one column at a time (Gram-Schmidt), avoiding a fresh fit each step.
     """
     scaler_Z = StandardScaler().fit(Z)
     scaler_y = StandardScaler().fit(y.reshape(-1, 1))
     Z_s = scaler_Z.transform(Z)
     y_s = scaler_y.transform(y.reshape(-1, 1)).ravel()
 
+    ss_tot = np.dot(y_s, y_s)  # y_s is zero-mean after StandardScaler
+    n = len(y_s)
+
     r2_train = []
     r2_cv = []
-    for k in range(1, len(dim_order) + 1):
-        dims = dim_order[:k]
-        Z_sub = Z_s[:, dims]
 
-        reg = LinearRegression().fit(Z_sub, y_s)
-        r2_train.append(reg.score(Z_sub, y_s))
+    # Incrementally build orthonormal basis Q via Gram-Schmidt
+    Q = np.empty((n, 0), dtype=np.float64)
+    for k, d in enumerate(dim_order, 1):
+        col = Z_s[:, d].astype(np.float64)
+        # Orthogonalize against existing Q columns
+        col = col - Q @ (Q.T @ col)
+        norm = np.linalg.norm(col)
+        if norm > 1e-12:
+            col /= norm
+            Q = np.column_stack([Q, col]) if Q.shape[1] > 0 else col[:, None]
+
+        # Train R²: ||Q Qᵀ y||² / ||y||²
+        proj = Q @ (Q.T @ y_s)
+        r2_train.append(float(np.dot(proj, proj) / ss_tot))
 
         if do_cv and (k <= 20 or k % 5 == 0 or k == len(dim_order)):
-            cv_scores = cross_val_score(LinearRegression(), Z_sub, y_s,
+            dims = dim_order[:k]
+            cv_scores = cross_val_score(LinearRegression(), Z_s[:, dims], y_s,
                                         cv=5, scoring='r2')
             r2_cv.append((k, cv_scores.mean()))
 
@@ -199,7 +210,7 @@ def plot_lasso_paths(alphas, coefs, target_name, out_dir, top_k=5,
 
     # Use a qualitative colormap for active dims
     n_active_total = len(active_at_cv)
-    cmap = plt.cm.get_cmap('tab20', max(n_active_total, 1))
+    cmap = matplotlib.colormaps.get_cmap('tab20').resampled(max(n_active_total, 1))
     active_color = {d: cmap(i) for i, d in enumerate(sorted(active_at_cv))}
 
     fig, ax = plt.subplots(figsize=(13, 7))
@@ -409,42 +420,27 @@ def plot_single_dim_r2(r2s, target_name, out_dir, top_k=10):
 
 def plot_cumulative_r2(r2_train_entry, r2_cv_entry, r2_train_coef, r2_cv_coef,
                        target_name, out_dir, full_r2=None):
-    """Cumulative R² as dimensions are added, two orderings side by side.
-
-    R² = 1 - SS_res/SS_tot measures how much variance in the target is
-    explained by an OLS fit to the selected latent dims; baseline (R²=0)
-    is predicting the sample mean for every event.
-    """
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6), sharey=True)
-    fig.subplots_adjust(wspace=0.06)
-    ax1, ax2 = axes
+    """Cumulative R² as dimensions are added (Lasso entry order only)."""
+    fig, ax = plt.subplots(figsize=(8, 6))
 
     n = len(r2_train_entry)
     ks = np.arange(1, n + 1)
-    ylabel = r'$R^2 = 1 - SS_\mathrm{res}/SS_\mathrm{tot}$'
 
-    for ax, r2_train, r2_cv, xlabel, subtitle in [
-        (ax1, r2_train_entry, r2_cv_entry,
-         'Latent Dimensions Added\n(Lasso Entry Order)', 'Lasso Entry Order'),
-        (ax2, r2_train_coef, r2_cv_coef,
-         'Latent Dimensions Added\n($|\\beta|$ Rank Order)', '$|\\beta|$ Rank Order'),
-    ]:
-        ax.plot(ks, r2_train, linewidth=2, color='#4363d8', label='Train $R^2$')
-        if r2_cv:
-            cv_ks, cv_vals = zip(*r2_cv)
-            ax.plot(cv_ks, cv_vals, 'o-', markersize=4, linewidth=2,
-                    color='#e6194b', label='5-fold CV $R^2$')
-        if full_r2 is not None:
-            ax.axhline(full_r2, color='0.5', linestyle='--', linewidth=1.5,
-                       label=f'All-80-dim $R^2$ = {full_r2:.4f}')
-        ax.set_xlabel(xlabel)
-        ax.set_title(f'Cumulative $R^2$ — {target_name}\n{subtitle}')
-        ax.legend(framealpha=0.85, edgecolor='0.7')
-        ax.set_xlim(1, n)
-        ax.set_ylim(bottom=0)
-        ax.grid(True, alpha=0.2, linestyle='--')
-
-    ax1.set_ylabel(ylabel)
+    ax.plot(ks, r2_train_entry, linewidth=2, color='#4363d8', label='Train $R^2$')
+    if r2_cv_entry:
+        cv_ks, cv_vals = zip(*r2_cv_entry)
+        ax.plot(cv_ks, cv_vals, 'o-', markersize=4, linewidth=2,
+                color='#e6194b', label='5-fold CV $R^2$')
+    if full_r2 is not None:
+        ax.axhline(full_r2, color='0.5', linestyle='--', linewidth=1.5,
+                   label=f'All-80-dim $R^2$ = {full_r2:.4f}')
+    ax.set_xlabel('Latent Dimensions Added\n(Lasso Entry Order)')
+    ax.set_ylabel(r'$R^2 = 1 - SS_\mathrm{res}/SS_\mathrm{tot}$')
+    ax.set_title(f'Cumulative $R^2$ — {target_name}\nLasso Entry Order')
+    ax.legend(framealpha=0.85, edgecolor='0.7')
+    ax.set_xlim(1, n)
+    ax.set_ylim(bottom=0)
+    ax.grid(True, alpha=0.2, linestyle='--')
 
     fig.tight_layout(pad=1.5)
     path = os.path.join(out_dir, f'cumulative_r2_{target_name}.png')
@@ -553,9 +549,9 @@ def main():
                         help='Zero Bias HDF5 filename')
     parser.add_argument('--out_dir', type=str, default='plots/lasso',
                         help='Output directory for all plots')
-    parser.add_argument('--n_events', type=int, default=None,
-                        help='Max events to use (None = all). '
-                             'Lasso paths use all; R² CV uses --n_events_r2.')
+    parser.add_argument('--n_events', type=int, default=200000,
+                        help='Max events to load (default 200k). '
+                             'Lasso paths use all loaded; R² CV uses --n_events_r2.')
     parser.add_argument('--n_events_r2', type=int, default=200000,
                         help='Events for R² breakdown (CV is slow on >200k)')
     parser.add_argument('--n_alphas', type=int, default=100,

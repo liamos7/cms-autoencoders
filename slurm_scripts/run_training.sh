@@ -34,22 +34,22 @@ cd /scratch/network/lo8603/thesis/fast-ad
 
 # Run training
 
-#python train-teacher.py \
-    #--dataset CICADA \
-    #--model AE \
-   # --data-root-path /scratch/network/lo8603/thesis/fast-ad/data/h5_files/ \
-   # --latent-dim 20 \
-   # --epochs 100 \
-   # -o /scratch/network/lo8603/thesis/fast-ad/outputs/ae_phase1_sigmoid_dim20/
-
 python train-teacher.py \
     --dataset CICADA \
-    --model NAEWithEnergyTraining \
+    --model AE \
     --data-root-path /scratch/network/lo8603/thesis/fast-ad/data/h5_files/ \
-    --load-pretrained-path /scratch/network/lo8603/thesis/fast-ad/outputs/ae_phase1_sigmoid_dim20/model_best.pkl \
     --latent-dim 20 \
-    --epochs 50 \
-    -o /scratch/network/lo8603/thesis/fast-ad/outputs/nae_phase2_fixed_dim20/
+    --epochs 100 \
+    -o /scratch/network/lo8603/thesis/fast-ad/outputs/ae_phase1_sigmoid_dim20_fixed_zb/
+
+#python train-teacher.py \
+ #   --dataset CICADA \
+  #  --model NAEWithEnergyTraining \
+   # --data-root-path /scratch/network/lo8603/thesis/fast-ad/data/h5_files/ \
+    #--load-pretrained-path /scratch/network/lo8603/thesis/fast-ad/outputs/ae_phase1_sigmoid_dim20_fixed_zb/model_best.pkl \
+    #--latent-dim 20 \
+    #--epochs 50 \
+    #-o /scratch/network/lo8603/thesis/fast-ad/outputs/nae_phase2_sigmoid_dim20_fixed_zb/
 
 echo "=============================="
 echo "End time: $(date)"

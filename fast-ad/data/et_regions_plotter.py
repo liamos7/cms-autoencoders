@@ -30,17 +30,36 @@ plt.rcParams.update({
 })
 
 CMAP = "inferno"
-# Target percentile of total_et to pick a representative event (not too quiet, not saturated)
-TARGET_TOTAL_ET_PERCENTILE = 75
+
+
+MEAN_SAMPLE = 10_000
 
 
 def pick_event(h5path):
-    """Return the event whose total_et is closest to TARGET_TOTAL_ET_PERCENTILE."""
+    """Return the event whose spatial ET pattern is closest to the process mean image."""
     with h5py.File(h5path, "r") as f:
-        total_et = np.array(f["total_et"])
-        target = np.percentile(total_et, TARGET_TOTAL_ET_PERCENTILE)
-        idx = int(np.argmin(np.abs(total_et - target)))
-        event = f["et_regions"][idx]   # (18, 14)
+        n = f["et_regions"].shape[0]
+        # Subsample for mean computation
+        sample_n = min(MEAN_SAMPLE, n)
+        rng = np.random.default_rng(42)
+        sample_idx = np.sort(rng.choice(n, sample_n, replace=False))
+        sample = f["et_regions"][list(sample_idx)].astype(np.float32)  # (S, 18, 14)
+        mean_image = sample.mean(axis=0)  # (18, 14)
+
+        # Find event in the full dataset closest to mean image by L2 distance.
+        # To avoid loading all N events, score in chunks.
+        best_idx, best_dist = 0, np.inf
+        CHUNK = 50_000
+        for start in range(0, n, CHUNK):
+            end = min(start + CHUNK, n)
+            chunk = f["et_regions"][start:end].astype(np.float32)
+            dists = np.mean((chunk - mean_image) ** 2, axis=(1, 2))
+            local_best = int(np.argmin(dists))
+            if dists[local_best] < best_dist:
+                best_dist = dists[local_best]
+                best_idx = start + local_best
+
+        event = f["et_regions"][best_idx].astype(np.float32)
     return event
 
 
@@ -58,18 +77,21 @@ def plot_et_regions(h5_files, output_path):
 
     events = {Path(p).stem: pick_event(p) for p in h5_files}
 
+    # Shared scale across all plots: clip empty cells to vmin so log(0) is avoided
+    VMIN = 0.5
+    vmax = max(float(e.max()) for e in events.values())
+    norm = mcolors.LogNorm(vmin=VMIN, vmax=max(vmax, 1))
+
     for ax, path in zip(axes, h5_files):
         stem = Path(path).stem
         event = events[stem]   # (18, 14)
         label = LABEL_MAP.get(stem, stem)
 
-        vmax = float(event.max())
-        # Power-norm with gamma<1 compresses the high end and lifts the low end,
-        # making sparse deposits visible without a log scale blowing up zeros.
-        norm = mcolors.PowerNorm(gamma=0.4, vmin=0, vmax=max(vmax, 1))
+        # Clip zeros to vmin so LogNorm doesn't blow up on empty cells
+        display = np.where(event > 0, event, VMIN)
 
         im = ax.imshow(
-            event.T,           # (14, 18): phi on y-axis, eta on x-axis
+            display.T,         # (14, 18): phi on y-axis, eta on x-axis
             origin="lower",
             aspect="auto",
             cmap=CMAP,
@@ -86,12 +108,10 @@ def plot_et_regions(h5_files, output_path):
         ax.set_xticklabels(range(1, 19, 2))
         ax.set_yticklabels(range(1, 15, 2))
 
-        # Colorbar attached directly to its subplot — no overlap
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.05)
         cb = fig.colorbar(im, cax=cax)
-        # Show a few representative tick values in GeV
-        nice_ticks = [t for t in [0, 25, 100, 250, 500, 1000] if t <= vmax]
+        nice_ticks = [t for t in [1, 10, 50, 200, 500, 1000] if VMIN <= t <= vmax]
         if nice_ticks:
             cb.set_ticks(nice_ticks)
             cb.set_ticklabels([str(t) for t in nice_ticks])

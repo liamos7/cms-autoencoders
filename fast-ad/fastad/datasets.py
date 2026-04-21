@@ -28,24 +28,48 @@ class CicadaTransform:
         x = x.unsqueeze(0)
         return torch.log1p(x) / self.norm_factor
 
+# Seeds chosen deliberately. SEED_80_20 reproduces the original 80/20 split
+# so Phase 1 checkpoints from before the three-way split remain valid.
+# SEED_50_50 partitions the remaining 20% into val/test independently.
+SEED_80_20 = 42
+SEED_50_50 = 43
 
 class CICADA(VisionDataset):
     """
-    CICADA dataset loader
-    Assumes data is stored in HDF5 format with 'et_regions' dataset for images.
-    
+    CICADA dataset loader with three-way stratified split.
+
     Label 0 = Zero Bias (background / inlier)
     Labels 1-10 = Various signal processes (holdouts / anomalies)
+
+    Parameters
+    ----------
+    split : str
+        One of "train" (80%), "val" (10%), or "test" (10%).
+        For backward compatibility, pass `train=True` → "train",
+        or `train=False` → "val" (matches pre-split behavior).
     """
-    def __init__(self, root: str = "/scratch/network/lo8603/thesis/fast-ad/data/h5_files/", transform=None, train=True, **kwargs):
+    def __init__(
+        self,
+        root: str = "/scratch/network/lo8603/thesis/fast-ad/data/h5_files/",
+        transform=None,
+        train: bool = None,
+        split: str = None,
+        **kwargs,
+    ):
         self.root = root
         self.transform = transform
-        self.train = train
+
+        # Resolve split from either `split` or the legacy `train` flag
+        if split is None:
+            if train is None:
+                raise ValueError("Must specify either `split` or `train`")
+            split = "train" if train else "val"
+        if split not in ("train", "val", "test"):
+            raise ValueError(f"split must be one of train/val/test, got {split!r}")
+        self.split = split
 
         self.class_dict = {
-            # Background (inlier) — label 0
             "zb":                0,
-            # Signal processes (holdouts) — labels 1+
             "glugluhtotautau":   1,
             "glugluhtogg":       2,
             "hto2longlivedto4b": 3,
@@ -59,7 +83,6 @@ class CICADA(VisionDataset):
         }
 
         self.data, self.targets = self._load_data()
-
 
     def _load_data(self):
         X, y = [], []
@@ -75,37 +98,50 @@ class CICADA(VisionDataset):
         X = np.concatenate(X, axis=0).astype(np.uint8)
         y = np.concatenate(y, axis=0)
 
+        # Step 1: 80/20 stratified split (matches pre-three-way behavior)
         train_size = int(0.8 * len(X))
+        X_tr, X_rest, y_tr, y_rest = train_test_split(
+            X, y,
+            train_size=train_size,
+            stratify=y,
+            random_state=SEED_80_20,
+            shuffle=True,
+        )
 
-        X_train, X_val, y_train, y_val = train_test_split(X, y, train_size=train_size, stratify=y, random_state=42, shuffle=True)
-
-        if self.train:
-            X, y = X_train, y_train
+        if self.split == "train":
+            X_out, y_out = X_tr, y_tr
         else:
-            X, y = X_val, y_val
+            # Step 2: split remaining 20% evenly into val/test, stratified again
+            X_val, X_te, y_val, y_te = train_test_split(
+                X_rest, y_rest,
+                test_size=0.5,
+                stratify=y_rest,
+                random_state=SEED_50_50,
+                shuffle=True,
+            )
+            if self.split == "val":
+                X_out, y_out = X_val, y_val
+            else:  # test
+                X_out, y_out = X_te, y_te
 
-        unique, counts = np.unique(y, return_counts=True)
-        print(f"Loaded CICADA dataset with shape {X.shape} and label distribution: {dict(zip(unique.tolist(), counts.tolist()))}")
-
-        return X, y
-
+        unique, counts = np.unique(y_out, return_counts=True)
+        print(
+            f"[CICADA split={self.split}] shape={X_out.shape} "
+            f"label distribution: {dict(zip(unique.tolist(), counts.tolist()))}"
+        )
+        return X_out, y_out
 
     def __len__(self):
         return len(self.data)
-
-
+    
     def __getitem__(self, idx):
         img, target = self.data[idx], self.targets[idx]
-
         if self.transform is not None:
             img = self.transform(img)
-            
         if self.target_transform is not None:
             target = self.target_transform(target)
-
         return img, target
     
-
 class TargetDataset(Dataset):
     def __init__(self, dataset: Dataset, teacher_mapping: callable, distillation_encoder: callable):
         self.dataset = dataset
