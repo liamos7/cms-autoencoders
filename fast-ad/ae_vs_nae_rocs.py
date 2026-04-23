@@ -31,8 +31,8 @@ sns.set_theme(style='whitegrid', context='notebook', font_scale=1.1)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DATA_DIR = Path("./data/h5_files/")
-AE_PATH  = "outputs/ae_phase1_sigmoid_dim20/model_best.pkl"
-NAE_PATH = "outputs/nae_phase2_fixed_dim20/model_best.pkl"
+AE_PATH  = "outputs/latent_dim_variation/ae_zb_dim20/model_best.pkl"
+NAE_PATH = "outputs/nae_phase2_dim20_fixed-zb_2/model_best.pkl"
 DEVICE   = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 BATCH    = 1024
 OUT_DIR  = "plots/rocs_test"

@@ -2,7 +2,12 @@
 conda/
 fast-ad/data/__pycache__
 fast-ad/data/h5_files
-fast-ad/outputs/
+fast-ad/outputs/latent_dim_variation/_score_cache
+fast-ad/outputs/*/ae_zb_dim*/model_iter*.pkl
+fast-ad/outputs/*/ae_zb_dim*/model_epoch*.pkl
+fast-ad/outputs/*/model_iter*.pkl
+fast-ad/outputs/*/model_epoch*.pkl
+
 logs/
 
 # Claude Code
@@ -18,7 +23,6 @@ __pycache__/
 *.tar.gz
 
 # Model checkpoints and data
-*.pkl
 *.h5
 
 # random pdfs

@@ -49,6 +49,7 @@ for DIM in "${LATENT_DIMS[@]}"; do
         -o "./outputs/latent_dim_variation/ae_zb_dim${DIM}" \
         -ho 1,2,3,4,5,6,7,8,9,10 \
         --epochs 100 \
+        --batch-size 1024 \
         -v
 
     echo "Finished latent_dim=${DIM} at $(date)"

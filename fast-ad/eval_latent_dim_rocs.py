@@ -37,8 +37,9 @@ DATA_DIR   = SCRIPT_DIR / "data" / "h5_files"
 SWEEP_DIR  = SCRIPT_DIR / "outputs" / "latent_dim_variation"
 PLOT_DIR   = SCRIPT_DIR / "plots" / "latent_dim_variation"
 DEVICE     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE = 2048
+BATCH_SIZE = 8192
 SPLIT      = "test"
+SCORE_CACHE_DIR = SCRIPT_DIR / "outputs" / "latent_dim_variation" / "_score_cache"
 
 # Must match datasets.py exactly
 SEED_80_20 = 42
@@ -139,7 +140,7 @@ def get_split_indices_per_class(data_dir, split="test"):
 # ── Scoring helpers ────────────────────────────────────────────────────────────
 def load_and_score(model, filepath, row_indices):
     """
-    Read only the requested rows via contiguous chunk reads + boolean masking,
+    Load only the requested rows via contiguous chunk reads + boolean masking,
     apply log-norm, and return anomaly scores.
     """
     with h5py.File(filepath, "r") as f:
@@ -150,10 +151,10 @@ def load_and_score(model, filepath, row_indices):
 
     norm_factor = np.float32(np.log1p(255))
     scores = []
+    CHUNK = 50_000
 
     with h5py.File(filepath, "r") as f:
         ds = f["et_regions"]
-        CHUNK = 50_000
         for start in range(0, total, CHUNK):
             end = min(start + CHUNK, total)
             chunk_keep = keep[start:end]
@@ -174,9 +175,29 @@ def load_and_score(model, filepath, row_indices):
     return np.concatenate(scores) if scores else np.array([], dtype=np.float32)
 
 
-def bootstrap_auc_ci(y_true, scores, n_boot=200, seed=0):
+def _cache_path(dim, process):
+    return SCORE_CACHE_DIR / f"dim{dim}_{process}.npy"
+
+
+def load_cached_or_score(model, dim, process, filepath, row_indices):
+    cp = _cache_path(dim, process)
+    if cp.exists():
+        return np.load(cp)
+    scores = load_and_score(model, filepath, row_indices)
+    SCORE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    np.save(cp, scores)
+    return scores
+
+
+def bootstrap_auc_ci(y_true, scores, n_boot=200, seed=0, max_samples=50_000):
     rng = np.random.default_rng(seed)
     n = len(y_true)
+    # Subsample once for bootstrap to avoid O(n) roc_curve on millions of points
+    if n > max_samples:
+        sub = rng.choice(n, max_samples, replace=False)
+        y_true  = y_true[sub]
+        scores  = scores[sub]
+        n = max_samples
     aucs = np.empty(n_boot, dtype=np.float64)
     for i in range(n_boot):
         idx = rng.integers(0, n, n)
@@ -228,42 +249,61 @@ def main():
         sys.exit(1)
 
     dims = [d for d, _ in dim_paths]
-    print(f"Found models for latent dims: {dims}")
-    print(f"Evaluating on split: {SPLIT!r}")
-
-    # ── Compute test-split indices once (no data loaded) ─────────────────────
-    print(f"\nComputing {SPLIT}-split indices...")
-    split_indices = get_split_indices_per_class(DATA_DIR, split=SPLIT)
-    for p, idx in split_indices.items():
-        print(f"  {PRETTY_NAMES.get(p, p):<20} {len(idx):>8} events")
+    print(f"Found models for latent dims: {dims}", flush=True)
+    print(f"Evaluating on split: {SPLIT!r}", flush=True)
 
     # ── Score all processes for each dim ─────────────────────────────────────
-    print("\nScoring...")
-    bg_scores  = {}   # dim -> np array
-    sig_scores = {p: {} for p in SIGNALS}
+    all_processes = [p for p in CLASS_ORDER if (DATA_DIR / f"{p}.h5").exists()]
+    all_cached = all(
+        _cache_path(dim, process).exists()
+        for dim, _ in dim_paths
+        for process in all_processes
+    )
 
-    for dim, ckpt_path in dim_paths:
-        print(f"  dim={dim}...")
-        model = get_cicada_ae(latent_dim=dim)
-        ckpt  = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
-        model.load_state_dict(ckpt["model_state"])
-        model.to(DEVICE).eval()
+    if all_cached:
+        print("\nAll scores cached — skipping index computation and scoring.", flush=True)
+        bg_scores  = {}
+        sig_scores = {p: {} for p in SIGNALS}
+        for dim, _ in dim_paths:
+            for process in all_processes:
+                scores = np.load(_cache_path(dim, process))
+                if process == "zb":
+                    bg_scores[dim] = scores
+                else:
+                    sig_scores[process][dim] = scores
+    else:
+        # ── Compute test-split indices once (no data loaded) ─────────────────
+        print(f"\nComputing {SPLIT}-split indices...", flush=True)
+        split_indices = get_split_indices_per_class(DATA_DIR, split=SPLIT)
+        for p, idx in split_indices.items():
+            print(f"  {PRETTY_NAMES.get(p, p):<20} {len(idx):>8} events", flush=True)
 
-        for process, local_idx in split_indices.items():
-            filepath = DATA_DIR / f"{process}.h5"
-            if not filepath.exists():
-                continue
-            scores = load_and_score(model, filepath, local_idx)
-            if process == "zb":
-                bg_scores[dim] = scores
-            else:
-                sig_scores[process][dim] = scores
+        print("\nScoring...", flush=True)
+        bg_scores  = {}
+        sig_scores = {p: {} for p in SIGNALS}
 
-        del model
-        torch.cuda.empty_cache()
+        for dim, ckpt_path in dim_paths:
+            print(f"  dim={dim}...", flush=True)
+            model = get_cicada_ae(latent_dim=dim)
+            ckpt  = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
+            model.load_state_dict(ckpt["model_state"])
+            model.to(DEVICE).eval()
+
+            for process, local_idx in split_indices.items():
+                filepath = DATA_DIR / f"{process}.h5"
+                if not filepath.exists():
+                    continue
+                scores = load_cached_or_score(model, dim, process, filepath, local_idx)
+                if process == "zb":
+                    bg_scores[dim] = scores
+                else:
+                    sig_scores[process][dim] = scores
+
+            del model
+            torch.cuda.empty_cache()
 
     # ── Compute AUC table ─────────────────────────────────────────────────────
-    print("\nComputing AUC...")
+    print("\nComputing AUC...", flush=True)
     records = []
     for process in SIGNALS:
         pretty = PRETTY_NAMES.get(process, process)
@@ -276,12 +316,17 @@ def main():
             y_score = np.concatenate([bg, sg])
             fpr, tpr, _ = roc_curve(y_true, y_score)
             auc_val = sk_auc(fpr, tpr)
-            ci = bootstrap_auc_ci(y_true, y_score, n_boot=200, seed=dim)
+            # Thin the stored curve to 2000 points max (saves memory, not used for AUC)
+            if len(fpr) > 2000:
+                idx_thin = np.round(np.linspace(0, len(fpr) - 1, 2000)).astype(int)
+                fpr, tpr = fpr[idx_thin], tpr[idx_thin]
+            ci = bootstrap_auc_ci(y_true, y_score, n_boot=100, seed=dim)
             records.append({
                 "signal": pretty, "latent_dim": dim,
                 "auc": auc_val, "ci_lo": ci[0], "ci_hi": ci[1],
                 "fpr": fpr, "tpr": tpr,
             })
+            print(f"  {pretty:<20} dim={dim}  AUC={auc_val:.4f}", flush=True)
 
     df_auc = pd.DataFrame([{k: v for k, v in r.items() if k not in ("fpr", "tpr")}
                             for r in records])

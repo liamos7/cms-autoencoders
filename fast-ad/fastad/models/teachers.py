@@ -254,14 +254,14 @@ class NAEWithEnergyTraining(NAE):
         encoder,
         decoder,
         spherical=False,
-        temperature=1.0,
+        temperature=0.5,       # was 1.0
         temperature_trainable=False,
-        gamma=1e-2,           # Weight for energy^2 regularization
+        gamma=0.005,         # was 1e-2  # Weight for energy^2 regularization
         neg_lambda=1.0,      # Weight on negative energy term
         l2_weight=1e-8,      # L2 weight regularization
-        z_step_size=0.005,     # Slightly reduced for stability
+        z_step_size=0.01,     # was 0.005
         z_noise_std=0.005,
-        z_steps=30,
+        z_steps=60,      # was 30
         z_use_metropolis=False,
         x_step_size=0.001,     # Reduced from 0.05 to prevent explosion
         x_noise_std=0.0005,
