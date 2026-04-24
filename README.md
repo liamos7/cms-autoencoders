@@ -1,6 +1,6 @@
-# Thesis Project Structure
+# Real-Time Autoencoder Anomaly Detection Methods at the Large Hadron Collider
 
-This is an anomaly detection project for particle physics, focused on training a
+This is an anomaly detection senior thesis for particle physics, focused on training a
 Normalized Autoencoder (NAE) for Beyond-Standard-Model (BSM) physics detection
 at the LHC/CMS CICADA L1 trigger system.
 
