@@ -2,7 +2,8 @@
 
 This is an anomaly detection senior thesis for particle physics, focused on training a
 Normalized Autoencoder (NAE) for Beyond-Standard-Model (BSM) physics detection
-at the LHC/CMS CICADA L1 trigger system.
+at the LHC/CMS CICADA L1 trigger system. This [senior thesis](O'Shaughnessy_Liam_Senior_Thesis.pdf)
+was submitted for Princeton University physics undergraduate requirements.
 
 ---
 
