@@ -1,7 +1,7 @@
-# Lasso paths and R² analysis of CICADA latent features.
-# R² = 1 - SS_res/SS_tot: coefficient of determination for predicting a target
-# (teacher_score / total_et / nPV) from the 80-dimensional latent space via OLS.
-# Baseline R²=0 corresponds to always predicting the sample mean (no model).
+'''
+For HDF5 ZB data, run regularization paths, explaining observables with best-subset of latent factors, and calculate R^2
+'''
+
 import os
 import argparse
 import numpy as np
