@@ -1,3 +1,7 @@
+'''
+Directs model training epochs
+'''
+
 import time
 import os
 import torch
