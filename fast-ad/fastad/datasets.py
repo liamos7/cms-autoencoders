@@ -1,3 +1,7 @@
+'''
+Fetch, process, and sample data as needed
+'''
+
 import os
 from typing import Union, Type, Tuple
 import urllib
