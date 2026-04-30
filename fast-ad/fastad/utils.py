@@ -1,3 +1,7 @@
+'''
+Helper methods
+'''
+
 import argparse
 import os
 
