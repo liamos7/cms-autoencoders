@@ -1,3 +1,7 @@
+'''
+Monitors loss and logs to TensorBoard
+'''
+
 import numpy as np
 
 from .utils import AverageMeter
