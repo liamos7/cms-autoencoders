@@ -1,6 +1,9 @@
+'''
+Student model architectures, not used in this project
+'''
+
 import torch
 from torch import nn
-
 
 class StudentA(nn.Module):
     """
